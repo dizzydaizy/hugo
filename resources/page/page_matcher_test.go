@@ -157,9 +157,11 @@ func TestDecodeCascadeConfig(t *testing.T) {
 }
 
 type testConfig struct {
-	environment string
-	running     bool
-	workingDir  string
+	environment  string
+	running      bool
+	workingDir   string
+	multihost    bool
+	multilingual bool
 }
 
 func (c testConfig) Environment() string {
@@ -172,6 +174,14 @@ func (c testConfig) Running() bool {
 
 func (c testConfig) WorkingDir() string {
 	return c.workingDir
+}
+
+func (c testConfig) IsMultihost() bool {
+	return c.multihost
+}
+
+func (c testConfig) IsMultilingual() bool {
+	return c.multilingual
 }
 
 func TestIsGlobWithExtension(t *testing.T) {

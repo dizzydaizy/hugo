@@ -329,7 +329,7 @@ cascade:
 
 		counters := &buildCounters{}
 		b.Build(BuildCfg{testCounters: counters})
-		b.Assert(int(counters.contentRenderCounter.Load()), qt.Equals, 2)
+		b.Assert(int(counters.contentRenderCounter.Load()), qt.Equals, 1)
 
 		b.AssertFileContent("public/post/index.html", `Banner: post.jpg|Layout: postlayout|Type: posttype|Content: <p>content edit</p>`)
 		b.AssertFileContent("public/post/dir/p1/index.html", `Banner: post.jpg|Layout: postlayout|`)
@@ -672,8 +672,59 @@ S1|p1:|p2:p2|
 	})
 }
 
+func TestCascadeEditIssue12449(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+baseURL = "https://example.com"
+disableKinds = ['sitemap','rss', 'home', 'taxonomy','term']
+disableLiveReload = true
+-- layouts/_default/list.html --
+Title: {{ .Title }}|{{ .Content }}|cascadeparam: {{ .Params.cascadeparam }}|
+-- layouts/_default/single.html --
+Title: {{ .Title }}|{{ .Content }}|cascadeparam: {{ .Params.cascadeparam }}|
+-- content/mysect/_index.md --
+---
+title: mysect
+cascade:
+  description: descriptionvalue
+  params:
+    cascadeparam: cascadeparamvalue
+---
+mysect-content|
+-- content/mysect/p1/index.md --
+---
+slug: p1
+---
+p1-content|
+-- content/mysect/subsect/_index.md --
+---
+slug: subsect
+---
+subsect-content|
+`
+
+	b := TestRunning(t, files)
+
+	// Make the cascade set the title.
+	b.EditFileReplaceAll("content/mysect/_index.md", "description: descriptionvalue", "title: cascadetitle").Build()
+	b.AssertFileContent("public/mysect/subsect/index.html", "Title: cascadetitle|")
+
+	// Edit cascade title.
+	b.EditFileReplaceAll("content/mysect/_index.md", "title: cascadetitle", "title: cascadetitle-edit").Build()
+	b.AssertFileContent("public/mysect/subsect/index.html", "Title: cascadetitle-edit|")
+
+	// Revert title change.
+	// The step below failed in #12449.
+	b.EditFileReplaceAll("content/mysect/_index.md", "title: cascadetitle-edit", "description: descriptionvalue").Build()
+	b.AssertFileContent("public/mysect/subsect/index.html", "Title: |")
+}
+
 // Issue 11977.
 func TestCascadeExtensionInPath(t *testing.T) {
+	t.Parallel()
+
 	files := `
 -- hugo.toml --
 baseURL = "https://example.org"
@@ -699,4 +750,94 @@ title: "Post 1"
 	b, err := TestE(t, files)
 	b.Assert(err, qt.IsNotNil)
 	b.AssertLogContains(`cascade target path "/posts/post-1.de.md" looks like a path with an extension; since Hugo v0.123.0 this will not match anything, see  https://gohugo.io/methods/page/path/`)
+}
+
+func TestCascadeExtensionInPathIgnore(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+baseURL = "https://example.org"
+ignoreLogs   = ['cascade-pattern-with-extension']
+[languages]
+[languages.en]
+weight = 1
+[languages.de]
+-- content/_index.de.md --
++++
+[[cascade]]
+[cascade.params]
+foo = 'bar'
+[cascade._target]
+path = '/posts/post-1.de.md'
++++
+-- content/posts/post-1.de.md --
+---
+title: "Post 1"
+---
+-- layouts/_default/single.html --
+{{ .Title }}|{{ .Params.foo }}$
+`
+	b := Test(t, files)
+	b.AssertLogContains(`! looks like a path with an extension`)
+}
+
+func TestCascadConfigExtensionInPath(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+baseURL = "https://example.org"
+[[cascade]]
+[cascade.params]
+foo = 'bar'
+[cascade._target]
+path = '/p1.md'
+`
+	b, err := TestE(t, files)
+	b.Assert(err, qt.IsNotNil)
+	b.AssertLogContains(`looks like a path with an extension`)
+}
+
+func TestCascadConfigExtensionInPathIgnore(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+baseURL = "https://example.org"
+ignoreLogs   = ['cascade-pattern-with-extension']
+[[cascade]]
+[cascade.params]
+foo = 'bar'
+[cascade._target]
+path = '/p1.md'
+`
+	b := Test(t, files)
+	b.AssertLogContains(`! looks like a path with an extension`)
+}
+
+func TestCascadeIssue12172(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['rss','sitemap','taxonomy','term']
+[[cascade]]
+headless = true
+[cascade._target]
+path = '/s1**'
+-- content/s1/p1.md --
+---
+title: p1
+---
+-- layouts/_default/single.html --
+{{ .Title }}|
+-- layouts/_default/list.html --
+{{ .Title }}|
+  `
+	b := Test(t, files)
+
+	b.AssertFileExists("public/index.html", true)
+	b.AssertFileExists("public/s1/index.html", false)
+	b.AssertFileExists("public/s1/p1/index.html", false)
 }

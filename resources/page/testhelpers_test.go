@@ -111,10 +111,6 @@ type testPage struct {
 	sectionEntries []string
 }
 
-func (p *testPage) Err() resource.ResourceError {
-	return nil
-}
-
 func (p *testPage) Aliases() []string {
 	panic("testpage: not implemented")
 }
@@ -127,14 +123,6 @@ func (p *testPage) AlternativeOutputFormats() OutputFormats {
 	panic("testpage: not implemented")
 }
 
-func (p *testPage) Author() Author {
-	return Author{}
-}
-
-func (p *testPage) Authors() AuthorList {
-	return nil
-}
-
 func (p *testPage) BaseFileName() string {
 	panic("testpage: not implemented")
 }
@@ -144,6 +132,10 @@ func (p *testPage) BundleType() string {
 }
 
 func (p *testPage) Content(context.Context) (any, error) {
+	panic("testpage: not implemented")
+}
+
+func (p *testPage) Markup(...any) Markup {
 	panic("testpage: not implemented")
 }
 
@@ -175,6 +167,10 @@ func (p *testPage) Description() string {
 	return ""
 }
 
+func (p *testPage) ContentWithoutSummary(ctx context.Context) (template.HTML, error) {
+	return "", nil
+}
+
 func (p *testPage) Dir() string {
 	panic("testpage: not implemented")
 }
@@ -189,14 +185,6 @@ func (p *testPage) Eq(other any) bool {
 
 func (p *testPage) ExpiryDate() time.Time {
 	return p.expiryDate
-}
-
-func (p *testPage) Ext() string {
-	panic("testpage: not implemented")
-}
-
-func (p *testPage) Extension() string {
-	panic("testpage: not implemented")
 }
 
 func (p *testPage) File() *source.File {
@@ -447,10 +435,6 @@ func (p *testPage) PrevPage() Page {
 
 func (p *testPage) PublishDate() time.Time {
 	return p.pubDate
-}
-
-func (p *testPage) RSSLink() template.URL {
-	return ""
 }
 
 func (p *testPage) RawContent() string {

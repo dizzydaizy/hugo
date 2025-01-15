@@ -69,17 +69,31 @@ When working with global resources instead of page resources, use the [`resource
 
 When working with global resources instead of page resources, use the [`resources.Match`] function.
 
+###### Mount
+
+{{< new-in "0.140.0" >}}
+
+(`ResourceGetter`) Mounts the given resources from the two arguments base (`string`) to the given target path (`string`) and returns an object that implements [Get](#get). Note that leading slashes in target marks an absolute path. Relative target paths allows you to mount resources relative to another set, e.g. a [Page bundle](/content-management/page-bundles/):
+
+```go-html-template
+{{ $common := resources.Match "/js/headlessui/*.*" }}
+{{ $importContext := (slice $.Page ($common.Mount "/js/headlessui" ".")) }}
+```
+
+This method is currently only useful in [js.Batch](/functions/js/batch/#import-context).
+
+
 ## Pattern matching
 
 With the `GetMatch` and `Match` methods, Hugo determines a match using a case-insensitive [glob pattern].
 
 {{% include "functions/_common/glob-patterns.md" %}}
 
-[`resources.ByType`]: /functions/resources/ByType
-[`resources.GetMatch`]: /functions/resources/ByType
-[`resources.Get`]: /functions/resources/ByType
-[`resources.Match`]: /functions/resources/ByType
-[`resources`]: /functions/resources
+[`resources.ByType`]: /functions/resources/ByType/
+[`resources.GetMatch`]: /functions/resources/ByType/
+[`resources.Get`]: /functions/resources/ByType/
+[`resources.Match`]: /functions/resources/ByType/
+[`resources`]: /functions/resources/
 [glob pattern]: https://github.com/gobwas/glob#example
 [media type]: https://en.wikipedia.org/wiki/Media_type
 [page bundle]: /getting-started/glossary/#page-bundle

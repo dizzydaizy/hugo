@@ -111,6 +111,28 @@ func (h *HugoSites) ShouldSkipFileChangeEvent(ev fsnotify.Event) bool {
 	return h.skipRebuildForFilenames[ev.Name]
 }
 
+func (h *HugoSites) Close() error {
+	return h.Deps.Close()
+}
+
+func (h *HugoSites) isRebuild() bool {
+	return h.buildCounter.Load() > 0
+}
+
+func (h *HugoSites) resolveSite(lang string) *Site {
+	if lang == "" {
+		lang = h.Conf.DefaultContentLanguage()
+	}
+
+	for _, s := range h.Sites {
+		if s.Lang() == lang {
+			return s
+		}
+	}
+
+	return nil
+}
+
 // Only used in tests.
 type buildCounters struct {
 	contentRenderCounter atomic.Uint64
@@ -160,9 +182,6 @@ func (f *fatalErrorHandler) Done() <-chan bool {
 type hugoSitesInit struct {
 	// Loads the data from all of the /data folders.
 	data *lazy.Init
-
-	// Performs late initialization (before render) of the templates.
-	layouts *lazy.Init
 
 	// Loads the Git info and CODEOWNERS for all the pages if enabled.
 	gitInfo *lazy.Init
@@ -269,7 +288,7 @@ func (h *HugoSites) pickOneAndLogTheRest(errors []error) error {
 	return errors[i]
 }
 
-func (h *HugoSites) isMultiLingual() bool {
+func (h *HugoSites) isMultilingual() bool {
 	return len(h.Sites) > 1
 }
 
@@ -328,7 +347,7 @@ func (h *HugoSites) GetContentPage(filename string) page.Page {
 
 func (h *HugoSites) loadGitInfo() error {
 	if h.Configs.Base.EnableGitInfo {
-		gi, err := newGitInfo(h.Conf)
+		gi, err := newGitInfo(h.Deps)
 		if err != nil {
 			h.Log.Errorln("Failed to read Git log:", err)
 		} else {
@@ -387,8 +406,9 @@ func (h *HugoSites) withPage(fn func(s string, p *pageState) bool) {
 type BuildCfg struct {
 	// Skip rendering. Useful for testing.
 	SkipRender bool
+
 	// Use this to indicate what changed (for rebuilds).
-	whatChanged *whatChanged
+	WhatChanged *WhatChanged
 
 	// This is a partial re-render of some selected pages.
 	PartialReRender bool
@@ -410,6 +430,10 @@ type BuildCfg struct {
 
 // shouldRender returns whether this output format should be rendered or not.
 func (cfg *BuildCfg) shouldRender(p *pageState) bool {
+	if p.skipRender() {
+		return false
+	}
+
 	if !p.renderOnce {
 		return true
 	}
@@ -475,6 +499,7 @@ func (h *HugoSites) loadData() error {
 		hugofs.WalkwayConfig{
 			Fs:         h.PathSpec.BaseFs.Data.Fs,
 			IgnoreFile: h.SourceSpec.IgnoreFile,
+			PathParser: h.Conf.PathParser(),
 			WalkFn: func(path string, fi hugofs.FileMetaInfo) error {
 				if fi.IsDir() {
 					return nil

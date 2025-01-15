@@ -29,8 +29,6 @@ import (
 	"github.com/gohugoio/hugo/common/hstrings"
 	"github.com/gohugoio/hugo/common/paths"
 
-	"github.com/gohugoio/hugo/hugofs/files"
-
 	"github.com/gohugoio/hugo/hugofs"
 
 	"github.com/gohugoio/hugo/helpers"
@@ -84,11 +82,13 @@ func NewContent(h *hugolib.HugoSites, kind, targetPath string, force bool) error
 	b.setArcheTypeFilenameToUse(ext)
 
 	withBuildLock := func() (string, error) {
-		unlock, err := h.BaseFs.LockBuild()
-		if err != nil {
-			return "", fmt.Errorf("failed to acquire a build lock: %s", err)
+		if !h.Configs.Base.NoBuildLock {
+			unlock, err := h.BaseFs.LockBuild()
+			if err != nil {
+				return "", fmt.Errorf("failed to acquire a build lock: %s", err)
+			}
+			defer unlock()
 		}
-		defer unlock()
 
 		if b.isDir {
 			return "", b.buildDir()
@@ -98,7 +98,7 @@ func NewContent(h *hugolib.HugoSites, kind, targetPath string, force bool) error
 			return "", fmt.Errorf("failed to resolve %q to an archetype template", targetPath)
 		}
 
-		if !files.IsContentFile(b.targetPath) {
+		if !h.Conf.ContentTypes().IsContentFile(b.targetPath) {
 			return "", fmt.Errorf("target path %q is not a known content format", b.targetPath)
 		}
 
