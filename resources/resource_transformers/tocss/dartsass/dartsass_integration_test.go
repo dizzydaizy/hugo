@@ -19,6 +19,7 @@ import (
 
 	"github.com/bep/logg"
 	qt "github.com/frankban/quicktest"
+	"github.com/gohugoio/hugo/htesting"
 	"github.com/gohugoio/hugo/hugolib"
 	"github.com/gohugoio/hugo/resources/resource_transformers/tocss/dartsass"
 )
@@ -524,4 +525,120 @@ T1: {{ $r.Content }}
 	b.AssertLogMatches(`Dart Sass: .*assets.*main.scss:12:0: number`)
 	b.AssertLogMatches(`Dart Sass: .*assets.*main.scss:13:0: number`)
 	b.AssertLogMatches(`Dart Sass: .*assets.*main.scss:14:0: number`)
+}
+
+// Note: This test is more or less duplicated in both of the SCSS packages (libsass and dartsass).
+func TestBootstrap(t *testing.T) {
+	t.Parallel()
+	if !dartsass.Supports() {
+		t.Skip()
+	}
+	if !htesting.IsCI() {
+		t.Skip("skip (slow) test in non-CI environment")
+	}
+
+	files := `
+-- hugo.toml --
+disableKinds = ["term", "taxonomy", "section", "page"]
+[module]
+[[module.imports]]
+path="github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+-- go.mod --
+module github.com/gohugoio/tests/testHugoModules
+-- assets/scss/main.scss --
+@import "bootstrap/bootstrap";
+-- layouts/index.html --
+{{ $cssOpts := (dict "transpiler" "dartsass" ) }}
+{{ $r := resources.Get "scss/main.scss" |  toCSS $cssOpts }}
+Styles: {{ $r.RelPermalink }}
+		`
+
+	b := hugolib.NewIntegrationTestBuilder(
+		hugolib.IntegrationTestConfig{
+			T:           t,
+			TxtarString: files,
+			NeedsOsFS:   true,
+		}).Build()
+
+	b.AssertFileContent("public/index.html", "Styles: /scss/main.css")
+}
+
+// Issue 12849
+func TestDirectoryIndexes(t *testing.T) {
+	t.Parallel()
+	if !dartsass.Supports() {
+		t.Skip()
+	}
+
+	files := `
+-- hugo.toml --
+disableKinds = ['page','section','rss','sitemap','taxonomy','term']
+
+[[module.mounts]]
+source = 'assets'
+target = 'assets'
+[[module.mounts]]
+source = "miscellaneous/sass"
+target = "assets/sass"
+-- layouts/index.html --
+{{ $opts := dict "transpiler" "dartsass" "outputStyle" "compressed" }}
+{{ (resources.Get "sass/main.scss" | toCSS $opts).Content }}
+-- assets/sass/main.scss --
+@use "foo1"; // directory with _index file from OS file system
+@use "bar1"; // directory with _index file from module mount
+@use "foo2"; // directory with index file from OS file system
+@use "bar2"; // directory with index file from module mount
+-- assets/sass/foo1/_index.scss --
+.foo1 {color: red;}
+-- miscellaneous/sass/bar1/_index.scss --
+.bar1 {color: blue;}
+-- assets/sass/foo2/index.scss --
+.foo2 {color: red;}
+-- miscellaneous/sass/bar2/index.scss --
+.bar2 {color: blue;}
+`
+
+	b := hugolib.NewIntegrationTestBuilder(
+		hugolib.IntegrationTestConfig{
+			T:           t,
+			NeedsOsFS:   true,
+			TxtarString: files,
+		}).Build()
+
+	b.AssertFileContent("public/index.html", ".foo1{color:red}.bar1{color:blue}.foo2{color:red}.bar2{color:blue}")
+}
+
+func TestIgnoreDeprecationWarnings(t *testing.T) {
+	t.Parallel()
+	if !dartsass.Supports() {
+		t.Skip()
+	}
+
+	files := `
+-- hugo.toml --
+disableKinds = ['page','section','rss','sitemap','taxonomy','term']
+-- assets/scss/main.scss --
+@import "moo";
+-- node_modules/foo/_moo.scss --
+$moolor: #fff;
+
+moo {
+  color: $moolor;
+}
+-- config.toml --
+-- layouts/index.html --
+{{ $cssOpts := (dict "includePaths" (slice "node_modules/foo") "transpiler" "dartsass" ) }}
+{{ $r := resources.Get "scss/main.scss" |  toCSS $cssOpts  | minify  }}
+T1: {{ $r.Content }}
+	`
+
+	b := hugolib.Test(t, files, hugolib.TestOptOsFs(), hugolib.TestOptWarn())
+	b.AssertLogContains("Dart Sass: DEPRECATED [import]")
+	b.AssertFileContent("public/index.html", `moo{color:#fff}`)
+
+	files = strings.ReplaceAll(files, `"transpiler" "dartsass"`, `"transpiler" "dartsass" "silenceDeprecations" (slice "import")`)
+
+	b = hugolib.Test(t, files, hugolib.TestOptOsFs(), hugolib.TestOptWarn())
+	b.AssertLogContains("! Dart Sass: DEPRECATED [import]")
+	b.AssertFileContent("public/index.html", `moo{color:#fff}`)
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/gohugoio/hugo/identity"
 	"github.com/gohugoio/hugo/resources/internal"
 
+	"github.com/gohugoio/hugo/common/hashing"
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/gohugoio/hugo/common/paths"
 
@@ -46,6 +47,9 @@ var (
 	_ resource.Cloner                    = (*genericResource)(nil)
 	_ resource.ResourcesLanguageMerger   = (*resource.Resources)(nil)
 	_ resource.Identifier                = (*genericResource)(nil)
+	_ resource.TransientIdentifier       = (*genericResource)(nil)
+	_ targetPathProvider                 = (*genericResource)(nil)
+	_ sourcePathProvider                 = (*genericResource)(nil)
 	_ identity.IdentityGroupProvider     = (*genericResource)(nil)
 	_ identity.DependencyManagerProvider = (*genericResource)(nil)
 	_ identity.Identity                  = (*genericResource)(nil)
@@ -59,11 +63,14 @@ type ResourceSourceDescriptor struct {
 	// The canonical source path.
 	Path *paths.Path
 
-	// The name of the resource.
-	Name string
+	// The normalized name of the resource.
+	NameNormalized string
 
 	// The name of the resource as it was read from the source.
 	NameOriginal string
+
+	// The title of the resource.
+	Title string
 
 	// Any base paths prepended to the target path. This will also typically be the
 	// language code, but setting it here means that it should not have any effect on
@@ -75,9 +82,13 @@ type ResourceSourceDescriptor struct {
 	TargetPath           string
 	BasePathRelPermalink string
 	BasePathTargetPath   string
+	SourceFilenameOrPath string // Used for error logging.
 
 	// The Data to associate with this resource.
 	Data map[string]any
+
+	// The Params to associate with this resource.
+	Params maps.Params
 
 	// Delay publishing until either Permalink or RelPermalink is called. Maybe never.
 	LazyPublish bool
@@ -107,8 +118,12 @@ func (fd *ResourceSourceDescriptor) init(r *Spec) error {
 		panic(errors.New("RelPath is empty"))
 	}
 
+	if fd.Params == nil {
+		fd.Params = make(maps.Params)
+	}
+
 	if fd.Path == nil {
-		fd.Path = paths.Parse("", fd.TargetPath)
+		fd.Path = r.Cfg.PathParser().Parse("", fd.TargetPath)
 	}
 
 	if fd.TargetPath == "" {
@@ -127,20 +142,17 @@ func (fd *ResourceSourceDescriptor) init(r *Spec) error {
 	}
 
 	fd.TargetPath = paths.ToSlashPreserveLeading(fd.TargetPath)
-	for i, base := range fd.TargetBasePaths {
-		dir := paths.ToSlashPreserveLeading(base)
-		if dir == "/" {
-			dir = ""
-		}
-		fd.TargetBasePaths[i] = dir
-	}
 
-	if fd.Name == "" {
-		fd.Name = fd.TargetPath
+	if fd.NameNormalized == "" {
+		fd.NameNormalized = fd.TargetPath
 	}
 
 	if fd.NameOriginal == "" {
-		fd.NameOriginal = fd.Name
+		fd.NameOriginal = fd.NameNormalized
+	}
+
+	if fd.Title == "" {
+		fd.Title = fd.NameOriginal
 	}
 
 	mediaType := fd.MediaType
@@ -212,9 +224,6 @@ type resourceCopier interface {
 
 // Copy copies r to the targetPath given.
 func Copy(r resource.Resource, targetPath string) resource.Resource {
-	if r.Err() != nil {
-		panic(fmt.Sprintf("Resource has an .Err: %s", r.Err()))
-	}
 	return r.(resourceCopier).cloneTo(targetPath)
 }
 
@@ -228,7 +237,7 @@ type baseResourceResource interface {
 
 type baseResourceInternal interface {
 	resource.Source
-	resource.NameOriginalProvider
+	resource.NameNormalizedProvider
 
 	fileInfo
 	mediaTypeAssigner
@@ -293,19 +302,22 @@ type fileInfo interface {
 }
 
 type hashProvider interface {
-	hash() string
+	hash() uint64
 }
+
+var _ resource.StaleInfo = (*StaleValue[any])(nil)
 
 type StaleValue[V any] struct {
 	// The value.
 	Value V
 
-	// IsStaleFunc reports whether the value is stale.
-	IsStaleFunc func() bool
+	// StaleVersionFunc reports the current version of the value.
+	// This always starts out at 0 and get incremented on staleness.
+	StaleVersionFunc func() uint32
 }
 
-func (s *StaleValue[V]) IsStale() bool {
-	return s.IsStaleFunc()
+func (s *StaleValue[V]) StaleVersion() uint32 {
+	return s.StaleVersionFunc()
 }
 
 type AtomicStaler struct {
@@ -313,11 +325,11 @@ type AtomicStaler struct {
 }
 
 func (s *AtomicStaler) MarkStale() {
-	atomic.StoreUint32(&s.stale, 1)
+	atomic.AddUint32(&s.stale, 1)
 }
 
-func (s *AtomicStaler) IsStale() bool {
-	return atomic.LoadUint32(&(s.stale)) > 0
+func (s *AtomicStaler) StaleVersion() uint32 {
+	return atomic.LoadUint32(&(s.stale))
 }
 
 // For internal use.
@@ -345,9 +357,13 @@ func GetTestInfoForResource(r resource.Resource) GenericResourceTestInfo {
 type genericResource struct {
 	publishInit *sync.Once
 
+	key     string
+	keyInit *sync.Once
+
 	sd    ResourceSourceDescriptor
 	paths internal.ResourcePaths
 
+	includeHashInKey     bool
 	sourceFilenameIsHash bool
 
 	h *resourceHash // A hash of the source content. Is only calculated in caching situations.
@@ -386,7 +402,7 @@ func (l *genericResource) size() int64 {
 	return l.h.size
 }
 
-func (l *genericResource) hash() string {
+func (l *genericResource) hash() uint64 {
 	if err := l.h.init(l); err != nil {
 		panic(err)
 	}
@@ -421,28 +437,44 @@ func (l *genericResource) Content(context.Context) (any, error) {
 	return hugio.ReadString(r)
 }
 
-func (r *genericResource) Err() resource.ResourceError {
-	return nil
-}
-
 func (l *genericResource) Data() any {
 	return l.sd.Data
 }
 
 func (l *genericResource) Key() string {
-	basePath := l.spec.Cfg.BaseURL().BasePathNoTrailingSlash
-	var key string
-	if basePath == "" {
-		key = l.RelPermalink()
-	} else {
-		key = strings.TrimPrefix(l.RelPermalink(), basePath)
-	}
+	l.keyInit.Do(func() {
+		basePath := l.spec.Cfg.BaseURL().BasePathNoTrailingSlash
+		if basePath == "" {
+			l.key = l.RelPermalink()
+		} else {
+			l.key = strings.TrimPrefix(l.RelPermalink(), basePath)
+		}
 
-	if l.spec.Cfg.IsMultihost() {
-		key = l.spec.Lang() + key
-	}
+		if l.spec.Cfg.IsMultihost() {
+			l.key = l.spec.Lang() + l.key
+		}
 
-	return key
+		if l.includeHashInKey && !l.sourceFilenameIsHash {
+			l.key += fmt.Sprintf("_%d", l.hash())
+		}
+	})
+
+	return l.key
+}
+
+func (l *genericResource) TransientKey() string {
+	return l.Key()
+}
+
+func (l *genericResource) targetPath() string {
+	return l.paths.TargetPath()
+}
+
+func (l *genericResource) sourcePath() string {
+	if p := l.sd.SourceFilenameOrPath; p != "" {
+		return p
+	}
+	return ""
 }
 
 func (l *genericResource) MediaType() media.Type {
@@ -457,8 +489,8 @@ func (l *genericResource) Name() string {
 	return l.name
 }
 
-func (l *genericResource) NameOriginal() string {
-	return l.sd.NameOriginal
+func (l *genericResource) NameNormalized() string {
+	return l.sd.NameNormalized
 }
 
 func (l *genericResource) Params() maps.Params {
@@ -598,6 +630,7 @@ func (rc *genericResource) cloneWithUpdates(u *transformationUpdate) (baseResour
 
 func (l genericResource) clone() *genericResource {
 	l.publishInit = &sync.Once{}
+	l.keyInit = &sync.Once{}
 	return &l
 }
 
@@ -611,7 +644,7 @@ type targetPather interface {
 }
 
 type resourceHash struct {
-	value    string
+	value    uint64
 	size     int64
 	initOnce sync.Once
 }
@@ -619,7 +652,7 @@ type resourceHash struct {
 func (r *resourceHash) init(l hugio.ReadSeekCloserProvider) error {
 	var initErr error
 	r.initOnce.Do(func() {
-		var hash string
+		var hash uint64
 		var size int64
 		f, err := l.ReadSeekCloser()
 		if err != nil {
@@ -627,7 +660,7 @@ func (r *resourceHash) init(l hugio.ReadSeekCloserProvider) error {
 			return
 		}
 		defer f.Close()
-		hash, size, err = helpers.MD5FromReaderFast(f)
+		hash, size, err = hashImage(f)
 		if err != nil {
 			initErr = fmt.Errorf("failed to calculate hash: %w", err)
 			return
@@ -637,4 +670,48 @@ func (r *resourceHash) init(l hugio.ReadSeekCloserProvider) error {
 	})
 
 	return initErr
+}
+
+func hashImage(r io.ReadSeeker) (uint64, int64, error) {
+	return hashing.XXHashFromReader(r)
+}
+
+// InternalResourceTargetPath is used internally to get the target path for a Resource.
+func InternalResourceTargetPath(r resource.Resource) string {
+	return r.(targetPathProvider).targetPath()
+}
+
+// InternalResourceSourcePathBestEffort is used internally to get the source path for a Resource.
+// It returns an empty string if the source path is not available.
+func InternalResourceSourcePath(r resource.Resource) string {
+	if sp, ok := r.(sourcePathProvider); ok {
+		if p := sp.sourcePath(); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// InternalResourceSourcePathBestEffort is used internally to get the source path for a Resource.
+// Used for error messages etc.
+// It will fall back to the target path if the source path is not available.
+func InternalResourceSourcePathBestEffort(r resource.Resource) string {
+	if s := InternalResourceSourcePath(r); s != "" {
+		return s
+	}
+	return InternalResourceTargetPath(r)
+}
+
+type targetPathProvider interface {
+	// targetPath is the relative path to this resource.
+	// In most cases this will be the same as the RelPermalink(),
+	// but it will not trigger any lazy publishing.
+	targetPath() string
+}
+
+// Optional interface implemented by resources that can provide the source path.
+type sourcePathProvider interface {
+	// sourcePath is the source path to this resource's source.
+	// This is used in error messages etc.
+	sourcePath() string
 }
