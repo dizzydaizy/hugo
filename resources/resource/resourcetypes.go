@@ -43,6 +43,9 @@ type OriginProvider interface {
 
 // NewResourceError creates a new ResourceError.
 func NewResourceError(err error, data any) ResourceError {
+	if data == nil {
+		data = map[string]any{}
+	}
 	return &resourceError{
 		error: err,
 		data:  data,
@@ -65,22 +68,22 @@ type ResourceError interface {
 	ResourceDataProvider
 }
 
-// ErrProvider provides an Err.
-type ErrProvider interface {
-	// Err returns an error if this resource is in an error state.
-	// This will currently only be set for resources obtained from resources.GetRemote.
-	Err() ResourceError
-}
-
 // Resource represents a linkable resource, i.e. a content page, image etc.
 type Resource interface {
+	ResourceWithoutMeta
+	ResourceMetaProvider
+}
+
+type ResourceWithoutMeta interface {
 	ResourceTypeProvider
 	MediaTypeProvider
 	ResourceLinksProvider
-	ResourceNameTitleProvider
-	ResourceParamsProvider
 	ResourceDataProvider
-	ErrProvider
+}
+
+type ResourceWrapper interface {
+	UnwrappedResource() Resource
+	WrapResource(Resource) ResourceWrapper
 }
 
 type ResourceTypeProvider interface {
@@ -127,20 +130,16 @@ type ResourceNameTitleProvider interface {
 	// So, for the image "/some/path/sunset.jpg" this will be "sunset.jpg".
 	// The value returned by this method will be used in the GetByPrefix and ByPrefix methods
 	// on Resources.
-	// Note that for bundled content resources with language code in the filename, this will
-	// be the name without the language code.
 	Name() string
 
 	// Title returns the title if set in front matter. For content pages, this will be the expected value.
 	Title() string
 }
 
-type NameOriginalProvider interface {
-	// NameOriginal is the original name of this resource.
-	// Note that for bundled content resources with language code in the filename, this will
-	// be the name with the language code.
+type NameNormalizedProvider interface {
+	// NameNormalized is the normalized name of this resource.
 	// For internal use (for now).
-	NameOriginal() string
+	NameNormalized() string
 }
 
 type ResourceParamsProvider interface {
@@ -166,7 +165,17 @@ type ResourcesLanguageMerger interface {
 
 // Identifier identifies a resource.
 type Identifier interface {
+	// Key is mostly for internal use and should be considered opaque.
+	// This value may change between Hugo versions.
 	Key() string
+}
+
+// TransientIdentifier identifies a transient resource.
+type TransientIdentifier interface {
+	// TransientKey is mostly for internal use and should be considered opaque.
+	// This value is implemented by transient resources where pointers may be short lived and
+	// not suitable for use as a map keys.
+	TransientKey() string
 }
 
 // WeightProvider provides a weight.
@@ -235,17 +244,27 @@ type StaleMarker interface {
 
 // StaleInfo tells if a resource is marked as stale.
 type StaleInfo interface {
-	IsStale() bool
+	StaleVersion() uint32
 }
 
-// IsStaleAny reports whether any of the os is marked as stale.
-func IsStaleAny(os ...any) bool {
-	for _, o := range os {
-		if s, ok := o.(StaleInfo); ok && s.IsStale() {
-			return true
+// StaleVersion returns the StaleVersion for the given os,
+// or 0 if not set.
+func StaleVersion(os any) uint32 {
+	if s, ok := os.(StaleInfo); ok {
+		return s.StaleVersion()
+	}
+	return 0
+}
+
+// StaleVersionSum calculates the sum of the StaleVersionSum for the given oss.
+func StaleVersionSum(oss ...any) uint32 {
+	var version uint32
+	for _, o := range oss {
+		if s, ok := o.(StaleInfo); ok && s.StaleVersion() > 0 {
+			version += s.StaleVersion()
 		}
 	}
-	return false
+	return version
 }
 
 // MarkStale will mark any of the oses as stale, if possible.
@@ -281,4 +300,12 @@ func (r resourceTypesHolder) ResourceType() string {
 
 func NewResourceTypesProvider(mediaType media.Type, resourceType string) ResourceTypesProvider {
 	return resourceTypesHolder{mediaType: mediaType, resourceType: resourceType}
+}
+
+// NameNormalizedOrName returns the normalized name if available, otherwise the name.
+func NameNormalizedOrName(r Resource) string {
+	if nn, ok := r.(NameNormalizedProvider); ok {
+		return nn.NameNormalized()
+	}
+	return r.Name()
 }

@@ -1,12 +1,12 @@
 ---
 title: Contribute to the Hugo project
-linkTitle: Overview
-description: Contribute to Hugo development, documentation, and themes.
+linktitle: Contribute
+description: Contribute to development, documentation, and themes.
 categories: []
 keywords: []
 menu:
   docs:
-    identifier: contribute-overview
+    identifier: contribute-in-this-section
     parent: contribute
     weight: 10
 weight: 10

@@ -15,23 +15,27 @@ package resources
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gohugoio/hugo/hugofs/glob"
 	"github.com/gohugoio/hugo/media"
+	"github.com/gohugoio/hugo/resources/page/pagemeta"
 	"github.com/gohugoio/hugo/resources/resource"
 
 	"github.com/spf13/cast"
 
 	"github.com/gohugoio/hugo/common/maps"
+	"github.com/gohugoio/hugo/common/paths"
+	maps0 "maps"
 )
 
 var (
-	_ mediaTypeAssigner             = (*genericResource)(nil)
-	_ mediaTypeAssigner             = (*imageResource)(nil)
-	_ resource.Staler               = (*genericResource)(nil)
-	_ resource.NameOriginalProvider = (*genericResource)(nil)
+	_ mediaTypeAssigner               = (*genericResource)(nil)
+	_ mediaTypeAssigner               = (*imageResource)(nil)
+	_ resource.Staler                 = (*genericResource)(nil)
+	_ resource.NameNormalizedProvider = (*genericResource)(nil)
 )
 
 // metaAssigner allows updating metadata in resources that supports it.
@@ -82,15 +86,39 @@ func (r *metaResource) setName(name string) {
 
 func (r *metaResource) updateParams(params map[string]any) {
 	if r.params == nil {
-		r.params = make(map[string]interface{})
+		r.params = make(map[string]any)
 	}
-	for k, v := range params {
-		r.params[k] = v
-	}
+	maps0.Copy(r.params, params)
 	r.changed = true
 }
 
-func CloneWithMetadataIfNeeded(m []map[string]any, r resource.Resource) resource.Resource {
+// cloneWithMetadataFromResourceConfigIfNeeded clones the given resource with the given metadata if the resource supports it.
+func cloneWithMetadataFromResourceConfigIfNeeded(rc *pagemeta.ResourceConfig, r resource.Resource) resource.Resource {
+	wmp, ok := r.(resource.WithResourceMetaProvider)
+	if !ok {
+		return r
+	}
+
+	if rc.Name == "" && rc.Title == "" && len(rc.Params) == 0 {
+		// No metadata.
+		return r
+	}
+
+	if rc.Title == "" {
+		rc.Title = rc.Name
+	}
+
+	wrapped := &metaResource{
+		name:   rc.Name,
+		title:  rc.Title,
+		params: rc.Params,
+	}
+
+	return wmp.WithResourceMeta(wrapped)
+}
+
+// CloneWithMetadataFromMapIfNeeded clones the given resource with the given metadata if the resource supports it.
+func CloneWithMetadataFromMapIfNeeded(m []map[string]any, r resource.Resource) resource.Resource {
 	wmp, ok := r.(resource.WithResourceMetaProvider)
 	if !ok {
 		return r
@@ -145,6 +173,8 @@ func assignMetadata(metadata []map[string]any, ma *metaResource) error {
 				name, found := meta["name"]
 				if found {
 					name := cast.ToString(name)
+					// Bundled resources in sub folders are relative paths with forward slashes. Make sure any renames also matches that format:
+					name = paths.TrimLeading(filepath.ToSlash(name))
 					if !nameCounterFound {
 						nameCounterFound = strings.Contains(name, counterPlaceHolder)
 					}

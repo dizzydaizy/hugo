@@ -250,7 +250,7 @@ Content.
 Base %d: {{ block "main" . }}FOO{{ end }}
 `
 
-	for i := 0; i < numPages; i++ {
+	for i := range numPages {
 		id := i + 1
 		b.WithContent(fmt.Sprintf("page%d.md", id), fmt.Sprintf(pageTemplate, id, id))
 		b.WithTemplates(fmt.Sprintf("_default/layout%d.html", id), fmt.Sprintf(singleTemplate, id))
@@ -258,7 +258,7 @@ Base %d: {{ block "main" . }}FOO{{ end }}
 	}
 
 	b.Build(BuildCfg{})
-	for i := 0; i < numPages; i++ {
+	for i := range numPages {
 		id := i + 1
 		b.AssertFileContent(fmt.Sprintf("public/page%d/index.html", id), fmt.Sprintf(`Base %d: %d`, id, id))
 	}
@@ -377,7 +377,7 @@ func TestTemplateFuncs(t *testing.T) {
 	b := newTestSitesBuilder(t).WithDefaultMultiSiteConfig()
 
 	homeTpl := `Site: {{ site.Language.Lang }} / {{ .Site.Language.Lang }} / {{ site.BaseURL }}
-Sites: {{ site.Sites.First.Home.Language.Lang }}
+Sites: {{ site.Sites.Default.Home.Language.Lang }}
 Hugo: {{ hugo.Generator }}
 `
 
@@ -460,7 +460,7 @@ complex: 80: 80
 func TestPartialWithZeroedArgs(t *testing.T) {
 	b := newTestSitesBuilder(t)
 	b.WithTemplatesAdded("index.html",
-		` 
+		`
 X{{ partial "retval" dict }}X
 X{{ partial "retval" slice }}X
 X{{ partial "retval" "" }}X
@@ -696,7 +696,7 @@ func TestApplyWithNamespace(t *testing.T) {
 
 	b.WithTemplates(
 		"index.html", `
-{{ $b := slice " a " "     b "   "       c" }}		
+{{ $b := slice " a " "     b "   "       c" }}
 {{ $a := apply $b "strings.Trim" "." " " }}
 a: {{ $a }}
 `,
@@ -705,4 +705,18 @@ a: {{ $a }}
 	b.Build(BuildCfg{})
 
 	b.AssertFileContent("public/index.html", `a: [a b c]`)
+}
+
+func TestOverrideInternalTemplate(t *testing.T) {
+	files := `
+-- hugo.toml --
+baseURL = "https://example.org"
+-- layouts/index.html --
+{{ template "_internal/google_analytics_async.html" . }}
+-- layouts/_internal/google_analytics_async.html --
+Overridden.
+`
+	b := Test(t, files)
+
+	b.AssertFileContent("public/index.html", "Overridden.")
 }

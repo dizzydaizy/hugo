@@ -27,6 +27,9 @@ var testParser = &PathParser{
 		"no": 0,
 		"en": 1,
 	},
+	IsContentExt: func(ext string) bool {
+		return ext == "md"
+	},
 }
 
 func TestParse(t *testing.T) {
@@ -162,6 +165,7 @@ func TestParse(t *testing.T) {
 				c.Assert(p.Identifiers(), qt.DeepEquals, []string{"txt", "no"})
 				c.Assert(p.Base(), qt.Equals, "/a/b.a.b.txt")
 				c.Assert(p.BaseNoLeadingSlash(), qt.Equals, "a/b.a.b.txt")
+				c.Assert(p.Path(), qt.Equals, "/a/b.a.b.no.txt")
 				c.Assert(p.PathNoLang(), qt.Equals, "/a/b.a.b.txt")
 				c.Assert(p.Ext(), qt.Equals, "txt")
 				c.Assert(p.PathNoIdentifier(), qt.Equals, "/a/b.a.b")
@@ -217,6 +221,7 @@ func TestParse(t *testing.T) {
 				c.Assert(p.NameNoExt(), qt.Equals, "index.no")
 				c.Assert(p.NameNoIdentifier(), qt.Equals, "index")
 				c.Assert(p.NameNoLang(), qt.Equals, "index.md")
+				c.Assert(p.Path(), qt.Equals, "/a/b/index.no.md")
 				c.Assert(p.PathNoLang(), qt.Equals, "/a/b/index.md")
 				c.Assert(p.Section(), qt.Equals, "a")
 			},
@@ -331,6 +336,22 @@ func TestParse(t *testing.T) {
 				c.Assert(p.Ext(), qt.Equals, "txt")
 				c.Assert(p.Name(), qt.Equals, "c.txt")
 				c.Assert(p.Path(), qt.Equals, "/a/b/c.txt")
+			},
+		},
+		{
+			"Content data file gotmpl",
+			"/a/b/_content.gotmpl",
+			func(c *qt.C, p *Path) {
+				c.Assert(p.Path(), qt.Equals, "/a/b/_content.gotmpl")
+				c.Assert(p.Ext(), qt.Equals, "gotmpl")
+				c.Assert(p.IsContentData(), qt.IsTrue)
+			},
+		},
+		{
+			"Content data file yaml",
+			"/a/b/_content.yaml",
+			func(c *qt.C, p *Path) {
+				c.Assert(p.IsContentData(), qt.IsFalse)
 			},
 		},
 	}

@@ -7,15 +7,11 @@ action:
   related: []
   returnType: time.Time
   signatures: [SITE.LastChange]
+expiryDate: 2026-02-19 # deprecated 2024-02-19 in v0.123.0
 ---
 
-The `LastChange` method on a `Site` object returns a [`time.Time`] value. Use this with time [functions] and [methods]. For example:
+{{% deprecated-in 0.123.0 %}}
+Use [`.Site.Lastmod`] instead.
 
-```go-html-template
-{{ .Site.LastChange | time.Format ":date_long" }} → October 16, 2023
-
-```
-
-[`time.Time`]: https://pkg.go.dev/time#Time
-[functions]: /functions/time
-[methods]: /methods/time
+[`.Site.Lastmod`]: /methods/site/lastmod/
+{{% /deprecated-in %}}

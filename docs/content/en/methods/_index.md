@@ -1,16 +1,17 @@
 ---
 title: Methods
-linkTitle: Overview
-description: A list of Hugo template methods including examples.
+
+description: Use these methods within your templates.
 categories: []
 keywords: []
 menu:
   docs:
-    identifier: methods-overview
+    identifier: methods-in-this-section
     parent: methods
     weight: 10
 weight: 10
 showSectionMenu: true
+aliases: ['/variables/']
 ---
 
 Use these methods within your templates.

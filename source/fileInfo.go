@@ -19,14 +19,14 @@ import (
 	"time"
 
 	"github.com/bep/gitmap"
+	"github.com/gohugoio/hugo/common/hashing"
 	"github.com/gohugoio/hugo/common/hugo"
 	"github.com/gohugoio/hugo/common/paths"
+	"github.com/gohugoio/hugo/hugofs/files"
 
 	"github.com/gohugoio/hugo/common/hugio"
 
 	"github.com/gohugoio/hugo/hugofs"
-
-	"github.com/gohugoio/hugo/helpers"
 )
 
 // File describes a source file.
@@ -35,6 +35,12 @@ type File struct {
 
 	uniqueID string
 	lazyInit sync.Once
+}
+
+// IsContentAdapter returns whether the file represents a content adapter.
+// This means that there may be more than one Page associated with this file.
+func (fi *File) IsContentAdapter() bool {
+	return fi.fim.Meta().PathInfo.IsContentData()
 }
 
 // Filename returns a file's absolute path and filename on disk.
@@ -50,18 +56,11 @@ func (fi *File) Dir() string {
 	return fi.pathToDir(fi.p().Dir())
 }
 
-// Extension is an alias to Ext().
-// Deprecated: Use Ext() instead.
-func (fi *File) Extension() string {
-	hugo.Deprecate(".File.Extension", "Use .File.Ext instead.", "v0.96.0")
-	return fi.Ext()
-}
-
 // Ext returns a file's extension without the leading period (e.g. "md").
 func (fi *File) Ext() string { return fi.p().Ext() }
 
 // Lang returns a file's language (e.g. "sv").
-// Deprecated: use .Page.Language.Lang instead.
+// Deprecated: Use .Page.Language.Lang instead.
 func (fi *File) Lang() string {
 	hugo.Deprecate(".Page.File.Lang", "Use .Page.Language.Lang instead.", "v0.123.0")
 	return fi.fim.Meta().Lang
@@ -118,7 +117,7 @@ func (fi *File) IsZero() bool {
 // in some cases that is slightly expensive to construct.
 func (fi *File) init() {
 	fi.lazyInit.Do(func() {
-		fi.uniqueID = helpers.MD5String(filepath.ToSlash(fi.Path()))
+		fi.uniqueID = hashing.MD5FromStringHexEncoded(filepath.ToSlash(fi.Path()))
 	})
 }
 
@@ -133,10 +132,17 @@ func (fi *File) p() *paths.Path {
 	return fi.fim.Meta().PathInfo.Unnormalized()
 }
 
-func NewFileInfoFrom(path, filename string) *File {
+var contentPathParser = &paths.PathParser{
+	IsContentExt: func(ext string) bool {
+		return true
+	},
+}
+
+// Used in tests.
+func NewContentFileInfoFrom(path, filename string) *File {
 	meta := &hugofs.FileMeta{
 		Filename: filename,
-		PathInfo: paths.Parse("", filepath.ToSlash(path)),
+		PathInfo: contentPathParser.Parse(files.ComponentFolderContent, filepath.ToSlash(path)),
 	}
 
 	return NewFileInfo(hugofs.NewFileMetaInfo(nil, meta))
@@ -168,6 +174,8 @@ type GitInfo struct {
 	AuthorDate time.Time `json:"authorDate"`
 	// The commit date.
 	CommitDate time.Time `json:"commitDate"`
+	// The commit message's body.
+	Body string `json:"body"`
 }
 
 // IsZero returns true if the GitInfo is empty,

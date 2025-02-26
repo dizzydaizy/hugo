@@ -1,12 +1,12 @@
 ---
 title: Functions
-linkTitle: Overview
-description: A list of Hugo template functions including examples.
+
+description: Use these functions within your templates and archetypes.
 categories: []
 keywords: []
 menu:
   docs:
-    identifier: functions-overview
+    identifier: functions-in-this-section
     parent: functions
     weight: 10
 weight: 10

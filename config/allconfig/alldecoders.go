@@ -18,7 +18,8 @@ import (
 	"strings"
 
 	"github.com/gohugoio/hugo/cache/filecache"
-	"github.com/gohugoio/hugo/common/loggers"
+
+	"github.com/gohugoio/hugo/cache/httpcache"
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/common/types"
 	"github.com/gohugoio/hugo/config"
@@ -26,11 +27,13 @@ import (
 	"github.com/gohugoio/hugo/config/security"
 	"github.com/gohugoio/hugo/config/services"
 	"github.com/gohugoio/hugo/deploy/deployconfig"
+	"github.com/gohugoio/hugo/hugolib/segments"
 	"github.com/gohugoio/hugo/langs"
 	"github.com/gohugoio/hugo/markup/markup_config"
 	"github.com/gohugoio/hugo/media"
 	"github.com/gohugoio/hugo/minifiers"
 	"github.com/gohugoio/hugo/modules"
+
 	"github.com/gohugoio/hugo/navigation"
 	"github.com/gohugoio/hugo/output"
 	"github.com/gohugoio/hugo/related"
@@ -43,11 +46,10 @@ import (
 )
 
 type decodeConfig struct {
-	p      config.Provider
-	c      *Config
-	fs     afero.Fs
-	logger loggers.Logger
-	bcfg   config.BaseConfig
+	p    config.Provider
+	c    *Config
+	fs   afero.Fs
+	bcfg config.BaseConfig
 }
 
 type decodeWeight struct {
@@ -96,6 +98,18 @@ var allDecoderSetups = map[string]decodeWeight{
 			return err
 		},
 	},
+	"httpcache": {
+		key: "httpcache",
+		decode: func(d decodeWeight, p decodeConfig) error {
+			var err error
+			p.c.HTTPCache, err = httpcache.DecodeConfig(p.bcfg, p.p.GetStringMap(d.key))
+			if p.c.IgnoreCache {
+				p.c.HTTPCache.Cache.For.Excludes = []string{"**"}
+				p.c.HTTPCache.Cache.For.Includes = []string{}
+			}
+			return err
+		},
+	},
 	"build": {
 		key: "build",
 		decode: func(d decodeWeight, p decodeConfig) error {
@@ -122,6 +136,14 @@ var allDecoderSetups = map[string]decodeWeight{
 			return err
 		},
 	},
+	"segments": {
+		key: "segments",
+		decode: func(d decodeWeight, p decodeConfig) error {
+			var err error
+			p.c.Segments, err = segments.DecodeSegments(p.p.GetStringMap(d.key))
+			return err
+		},
+	},
 	"server": {
 		key: "server",
 		decode: func(d decodeWeight, p decodeConfig) error {
@@ -138,6 +160,15 @@ var allDecoderSetups = map[string]decodeWeight{
 		decode: func(d decodeWeight, p decodeConfig) error {
 			var err error
 			p.c.Minify, err = minifiers.DecodeConfig(p.p.Get(d.key))
+			return err
+		},
+	},
+	"contenttypes": {
+		key:    "contenttypes",
+		weight: 100, // This needs to be decoded after media types.
+		decode: func(d decodeWeight, p decodeConfig) error {
+			var err error
+			p.c.ContentTypes, err = media.DecodeContentTypes(p.p.GetStringMap(d.key), p.c.MediaTypes.Config)
 			return err
 		},
 	},
@@ -293,7 +324,7 @@ var allDecoderSetups = map[string]decodeWeight{
 		key: "cascade",
 		decode: func(d decodeWeight, p decodeConfig) error {
 			var err error
-			p.c.Cascade, err = page.DecodeCascadeConfig(p.logger, p.p.Get(d.key))
+			p.c.Cascade, err = page.DecodeCascadeConfig(nil, p.p.Get(d.key))
 			return err
 		},
 	},
@@ -303,6 +334,41 @@ var allDecoderSetups = map[string]decodeWeight{
 			var err error
 			p.c.Menus, err = navigation.DecodeConfig(p.p.Get(d.key))
 			return err
+		},
+	},
+	"page": {
+		key: "page",
+		decode: func(d decodeWeight, p decodeConfig) error {
+			p.c.Page = config.PageConfig{
+				NextPrevSortOrder:          "desc",
+				NextPrevInSectionSortOrder: "desc",
+			}
+			if p.p.IsSet(d.key) {
+				if err := mapstructure.WeakDecode(p.p.Get(d.key), &p.c.Page); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		},
+		getCompiler: func(c *Config) configCompiler {
+			return &c.Page
+		},
+	},
+	"pagination": {
+		key: "pagination",
+		decode: func(d decodeWeight, p decodeConfig) error {
+			p.c.Pagination = config.Pagination{
+				PagerSize: 10,
+				Path:      "page",
+			}
+			if p.p.IsSet(d.key) {
+				if err := mapstructure.WeakDecode(p.p.Get(d.key), &p.c.Pagination); err != nil {
+					return err
+				}
+			}
+
+			return nil
 		},
 	},
 	"privacy": {
@@ -362,6 +428,8 @@ var allDecoderSetups = map[string]decodeWeight{
 				p.c.UglyURLs = vv
 			case string:
 				p.c.UglyURLs = vv == "true"
+			case maps.Params:
+				p.c.UglyURLs = cast.ToStringMapBool(maps.CleanConfigStringMap(vv))
 			default:
 				p.c.UglyURLs = cast.ToStringMapBool(v)
 			}

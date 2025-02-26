@@ -13,7 +13,7 @@ action:
 toc: true
 ---
 
-{{< new-in 0.120.0 >}}
+{{< new-in 0.120.0 />}}
 
 The last argument is the canvas color, expressed as an RGB or RGBA [hexadecimal color]. The default value is `ffffffff` (opaque white). The preceding arguments are the padding values, in pixels, using the CSS [shorthand property] syntax. Negative padding values will crop the image.
 
@@ -32,7 +32,7 @@ Create the filter:
 
 Combine with the [`Colors`] method to create a border with one of the image's most dominant colors:
 
-[`Colors`]: /methods/resource/colors
+[`Colors`]: /methods/resource/colors/
 
 ```go-html-template
 {{ with resources.Get "images/original.jpg" }}

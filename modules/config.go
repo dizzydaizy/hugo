@@ -86,7 +86,7 @@ func ApplyProjectConfigDefaults(mod Module, cfgs ...config.AllProvider) error {
 
 		first := cfgs[0]
 		dirsBase := first.DirsBase()
-		isMultiHost := first.IsMultihost()
+		isMultihost := first.IsMultihost()
 
 		for i, cfg := range cfgs {
 			dirs := cfg.Dirs()
@@ -113,7 +113,7 @@ func ApplyProjectConfigDefaults(mod Module, cfgs ...config.AllProvider) error {
 				dir = dirs.AssetDir
 			case files.ComponentFolderStatic:
 				// For static dirs, we only care about the language in multihost setups.
-				dropLang = !isMultiHost
+				dropLang = !isMultihost
 			}
 
 			var perLang bool
@@ -270,7 +270,7 @@ type Config struct {
 
 	// When enabled, we will pick the vendored module closest to the module
 	// using it.
-	// The default behaviour is to pick the first.
+	// The default behavior is to pick the first.
 	// Note that there can still be only one dependency of a given module path,
 	// so once it is in use it cannot be redefined.
 	VendorClosest bool
@@ -294,6 +294,12 @@ type Config struct {
 	// Comma separated glob list matching paths that should be treated as private.
 	// Configures GOPRIVATE when running the Go command for module operations.
 	Private string
+
+	// Configures GOAUTH when running the Go command for module operations.
+	// This is a semicolon-separated list of authentication commands for go-import and HTTPS module mirror interactions.
+	// This is useful for private repositories.
+	// See `go help goauth` for more information.
+	Auth string
 
 	// Defaults to "off".
 	// Set to a work file, e.g. hugo.work, to enable Go "Workspace" mode.
@@ -402,6 +408,9 @@ type Mount struct {
 
 	// Exclude all files matching the given Glob patterns (string or slice).
 	ExcludeFiles any
+
+	// Disable watching in watch mode for this mount.
+	DisableWatch bool
 }
 
 // Used as key to remove duplicates.

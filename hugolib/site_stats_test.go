@@ -32,8 +32,10 @@ func TestSiteStats(t *testing.T) {
 	siteConfig := `
 baseURL = "http://example.com/blog"
 
-paginate = 1
 defaultContentLanguage = "nn"
+
+[pagination]
+pagerSize = 1
 
 [languages]
 [languages.nn]
@@ -67,15 +69,15 @@ aliases: [/Ali%d]
 		"_default/terms.html", "Terms List|{{ .Title }}|{{ .Content }}",
 	)
 
-	for i := 0; i < 2; i++ {
-		for j := 0; j < 2; j++ {
+	for i := range 2 {
+		for j := range 2 {
 			pageID := i + j + 1
 			b.WithContent(fmt.Sprintf("content/sect/p%d.md", pageID),
 				fmt.Sprintf(pageTemplate, pageID, fmt.Sprintf("- tag%d", j), fmt.Sprintf("- category%d", j), pageID))
 		}
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		b.WithContent(fmt.Sprintf("assets/image%d.png", i+1), "image")
 	}
 
@@ -121,11 +123,10 @@ date: 2023-04-01
 ---
 -- layouts/index.html --
 site.Lastmod: {{ .Site.Lastmod.Format "2006-01-02" }}
-site.LastChange: {{ .Site.LastChange.Format "2006-01-02" }}
 home.Lastmod: {{ site.Home.Lastmod.Format "2006-01-02" }}
 
 `
 	b := Test(t, files)
 
-	b.AssertFileContent("public/index.html", "site.Lastmod: 2023-04-01\nsite.LastChange: 2023-04-01\nhome.Lastmod: 2023-01-01")
+	b.AssertFileContent("public/index.html", "site.Lastmod: 2023-04-01\nhome.Lastmod: 2023-01-01")
 }

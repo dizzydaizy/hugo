@@ -19,11 +19,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gohugoio/hugo/common/hashing"
 	"github.com/gohugoio/hugo/common/loggers"
 
 	"github.com/gohugoio/hugo/config"
-
-	"github.com/gohugoio/hugo/helpers"
 
 	"github.com/gohugoio/hugo/hugofs"
 
@@ -691,7 +690,7 @@ bundle min min key: {{ $jsonMinMin.Key }}
 
 `)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 
 		b.Build(BuildCfg{})
 
@@ -701,13 +700,13 @@ bundle min min key: {{ $jsonMinMin.Key }}
 			b.AssertFileContent(index, fmt.Sprintf("data content unmarshaled: v%d", i))
 			b.AssertFileContent(index, fmt.Sprintf("data assets content unmarshaled: v%d", i))
 
-			md5Asset := helpers.MD5String(fmt.Sprintf(`vdata: v%d`, i))
+			md5Asset := hashing.MD5FromStringHexEncoded(fmt.Sprintf(`vdata: v%d`, i))
 			b.AssertFileContent(index, fmt.Sprintf("assets fingerprinted: /data%d/data.%s.yaml", i, md5Asset))
 
 			// The original is not used, make sure it's not published.
 			b.Assert(b.CheckExists(fmt.Sprintf("public/data%d/data.yaml", i)), qt.Equals, false)
 
-			md5Bundle := helpers.MD5String(fmt.Sprintf(`data: v%d`, i))
+			md5Bundle := hashing.MD5FromStringHexEncoded(fmt.Sprintf(`data: v%d`, i))
 			b.AssertFileContent(index, fmt.Sprintf("bundle fingerprinted: /bundle%d/data.%s.yaml", i, md5Bundle))
 
 			b.AssertFileContent(index,
@@ -871,7 +870,7 @@ RegularPages: {{ range .RegularPages }}{{ .RelPermalink }}|File LogicalName: {{ 
 	b := Test(t, files)
 
 	// Note that the sort order gives us the most specific data file for the en language (the data.en.json).
-	b.AssertFileContent("public/mysection/mybundle/index.html", `Single:|/mysection/mybundle|File LogicalName: index.md||/mysection/mybundle/|page|Resources: data.json: Data JSON.|foo/p1.html: |p1.html: |p1.md: |data.txt: Data en txt.|$`)
+	b.AssertFileContent("public/mysection/mybundle/index.html", `Single:|/mysection/mybundle|File LogicalName: index.md||/mysection/mybundle/|page|Resources: data.en.txt: Data en txt.|data.json: Data JSON.|foo/p1.html: |p1.html: |p1.md: |$`)
 	b.AssertFileContent("public/mysection/index.html",
 		"List: |/mysection|File LogicalName: _index.md|/mysection/|section|Resources: sectiondata.json: Secion data JSON.|sectiondata.txt: Section data TXT.|$",
 		"RegularPages: /mysection/foo/p2/|File LogicalName: p2.md|/mysection/mybundle/|File LogicalName: index.md|/mysection/p2/|File LogicalName: p2.md|$")
@@ -886,12 +885,12 @@ baseURL = "https://example.com"
 F1.
 -- layouts/_default/single.html --
 GetMatch: {{ with .Resources.GetMatch "f1.en.*" }}{{ .Name }}: {{ .Content }}|{{ end }}
-Match: {{ range .Resources.Match "f1.en.*" }}{{ .Name }}: {{ .Content }}|{{ end }}
+Match: {{ range .Resources.Match "f1.En.*" }}{{ .Name }}: {{ .Content }}|{{ end }}
 `
 
 	b := Test(t, files)
 
-	b.AssertFileContent("public/mybundle/index.html", "GetMatch: f1.txt: F1.|", "Match: f1.txt: F1.|")
+	b.AssertFileContent("public/mybundle/index.html", "GetMatch: f1.en.txt: F1.|", "Match: f1.en.txt: F1.|")
 }
 
 func TestBundleResourcesWhenLanguageVariantIsDraft(t *testing.T) {
@@ -917,5 +916,44 @@ GetMatch: {{ with .Resources.GetMatch "f1.*" }}{{ .Name }}: {{ .Content }}|{{ en
 
 	b := Test(t, files)
 
-	b.AssertFileContent("public/mybundle/index.html", "GetMatch: f1.txt: F1.|")
+	b.AssertFileContent("public/mybundle/index.html", "GetMatch: f1.en.txt: F1.|")
+}
+
+func TestBundleBranchIssue12320(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['rss','sitemap','taxonomy','term']
+defaultContentLanguage = 'en'
+defaultContentLanguageInSubdir = true
+[languages.en]
+baseURL = "https://en.example.org/"
+contentDir = "content/en"
+[languages.fr]
+baseURL = "https://fr.example.org/"
+contentDir = "content/fr"
+-- content/en/s1/p1.md --
+---
+title: p1
+---
+-- content/en/s1/p1.txt --
+---
+p1.txt
+---
+-- layouts/_default/single.html --
+{{ .Title }}|
+-- layouts/_default/list.html --
+{{ .Title }}|
+`
+
+	b := Test(t, files)
+
+	b.AssertFileExists("public/en/s1/index.html", true)
+	b.AssertFileExists("public/en/s1/p1/index.html", true)
+	b.AssertFileExists("public/en/s1/p1.txt", true)
+
+	b.AssertFileExists("public/fr/s1/index.html", false)
+	b.AssertFileExists("public/fr/s1/p1/index.html", false)
+	b.AssertFileExists("public/fr/s1/p1.txt", false) // failing test
 }

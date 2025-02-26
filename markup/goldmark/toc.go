@@ -16,6 +16,10 @@ package goldmark
 import (
 	"bytes"
 
+	strikethroughAst "github.com/yuin/goldmark/extension/ast"
+
+	emojiAst "github.com/yuin/goldmark-emoji/ast"
+
 	"github.com/gohugoio/hugo/markup/tableofcontents"
 
 	"github.com/yuin/goldmark"
@@ -48,6 +52,10 @@ func (t *tocTransformer) Transform(n *ast.Document, reader text.Reader, pc parse
 		inHeading   bool
 		headingText bytes.Buffer
 	)
+
+	if ids := pc.IDs().(stringValuesProvider).StringValues(); len(ids) > 0 {
+		toc.SetIdentifiers(ids)
+	}
 
 	ast.Walk(n, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		s := ast.WalkStatus(ast.WalkContinue)
@@ -86,7 +94,9 @@ func (t *tocTransformer) Transform(n *ast.Document, reader text.Reader, pc parse
 			ast.KindCodeSpan,
 			ast.KindLink,
 			ast.KindImage,
-			ast.KindEmphasis:
+			ast.KindEmphasis,
+			strikethroughAst.KindStrikethrough,
+			emojiAst.KindEmoji:
 			err := t.r.Render(&headingText, reader.Source(), n)
 			if err != nil {
 				return s, err
@@ -125,5 +135,7 @@ func (e *tocExtension) Extend(m goldmark.Markdown) {
 	r.AddOptions(e.options...)
 	m.Parser().AddOptions(parser.WithASTTransformers(util.Prioritized(&tocTransformer{
 		r: r,
-	}, 10)))
+	},
+		// This must run after the ID generation (priority 100).
+		110)))
 }

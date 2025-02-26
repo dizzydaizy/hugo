@@ -80,8 +80,9 @@ func doTestTaxonomiesWithAndWithoutContentFile(t *testing.T, uglyURLs bool) {
 baseURL = "http://example.com/blog"
 titleCaseStyle = "firstupper"
 uglyURLs = %t
-paginate = 1
 defaultContentLanguage = "en"
+[pagination]
+pagerSize = 1
 [Taxonomies]
 tag = "tags"
 category = "categories"
@@ -313,7 +314,7 @@ func TestTaxonomiesNextGenLoops(t *testing.T) {
 </ul>
 `)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		b.WithContent(fmt.Sprintf("page%d.md", i+1), `
 ---
 Title: "Taxonomy!"
@@ -884,4 +885,144 @@ build:
 
 	b.AssertFileExists("public/tags/a/index.html", false)
 	b.AssertFileContent("public/index.html", "|0|")
+}
+
+func TestTaxonomiesTermLookup(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+baseURL = "https://example.com"
+[taxonomies]
+tag = "tags"
+-- content/_index.md --
+---
+title: "Home"
+tags: ["a", "b"]
+---
+-- layouts/taxonomy/tag.html --
+Tag: {{ .Title }}|
+-- content/tags/a/_index.md --
+---
+title: tag-a-title-override
+---
+`
+
+	b := Test(t, files)
+
+	b.AssertFileContent("public/tags/a/index.html", "Tag: tag-a-title-override|")
+}
+
+func TestTaxonomyLookupIssue12193(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['page','rss','section','sitemap']
+[taxonomies]
+author = 'authors'
+-- layouts/_default/list.html --
+{{ .Title }}|
+-- layouts/_default/author.terms.html --
+layouts/_default/author.terms.html
+-- content/authors/_index.md --
+---
+title: Authors Page
+---
+`
+
+	b := Test(t, files)
+
+	b.AssertFileExists("public/index.html", true)
+	b.AssertFileExists("public/authors/index.html", true)
+	b.AssertFileContent("public/authors/index.html", "layouts/_default/author.terms.html") // failing test
+}
+
+func TestTaxonomyNestedEmptySectionsIssue12188(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['rss','sitemap']
+defaultContentLanguage = 'en'
+defaultContentLanguageInSubdir = true
+[languages.en]
+weight = 1
+[languages.ja]
+weight = 2
+[taxonomies]
+'s1/category' = 's1/category'
+-- layouts/_default/single.html --
+{{ .Title }}|
+-- layouts/_default/list.html --
+{{ .Title }}|
+-- content/s1/p1.en.md --
+---
+title: p1
+---
+`
+
+	b := Test(t, files)
+
+	b.AssertFileExists("public/en/s1/index.html", true)
+	b.AssertFileExists("public/en/s1/p1/index.html", true)
+	b.AssertFileExists("public/en/s1/category/index.html", true)
+
+	b.AssertFileExists("public/ja/s1/index.html", false) // failing test
+	b.AssertFileExists("public/ja/s1/category/index.html", true)
+}
+
+func BenchmarkTaxonomiesGetTerms(b *testing.B) {
+	createBuilders := func(b *testing.B, numPages int) []*IntegrationTestBuilder {
+		files := `
+-- hugo.toml --
+baseURL = "https://example.com"
+disableKinds = ["RSS", "sitemap", "section"]
+[taxononomies]
+tag = "tags"
+-- layouts/_default/list.html --
+List.
+-- layouts/_default/single.html --
+GetTerms.tags: {{ range .GetTerms "tags" }}{{ .Title }}|{{ end }}
+-- content/_index.md --
+`
+
+		tagsVariants := []string{
+			"tags: ['a']",
+			"tags: ['a', 'b']",
+			"tags: ['a', 'b', 'c']",
+			"tags: ['a', 'b', 'c', 'd']",
+			"tags: ['a', 'b',  'd', 'e']",
+			"tags: ['a', 'b', 'c', 'd', 'e']",
+			"tags: ['a', 'd']",
+			"tags: ['a',  'f']",
+		}
+
+		for i := 1; i < numPages; i++ {
+			tags := tagsVariants[i%len(tagsVariants)]
+			files += fmt.Sprintf("\n-- content/posts/p%d.md --\n---\n%s\n---", i+1, tags)
+		}
+		cfg := IntegrationTestConfig{
+			T:           b,
+			TxtarString: files,
+		}
+		builders := make([]*IntegrationTestBuilder, b.N)
+
+		for i := range builders {
+			builders[i] = NewIntegrationTestBuilder(cfg)
+		}
+
+		b.ResetTimer()
+
+		return builders
+	}
+
+	for _, numPages := range []int{100, 1000, 10000, 20000} {
+		b.Run(fmt.Sprintf("pages_%d", numPages), func(b *testing.B) {
+			builders := createBuilders(b, numPages)
+			for i := 0; i < b.N; i++ {
+				builders[i].Build()
+			}
+		})
+	}
 }

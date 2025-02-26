@@ -15,7 +15,11 @@ toc: true
 Hugo v0.121.1 and later require at least Windows 10 or Windows Server 2016.
 {{% /note %}}
 
+## Editions
+
 {{% include "installation/_common/01-editions.md" %}}
+
+Unless your specific deployment needs require the extended/deploy edition, we recommend the extended edition.
 
 {{% include "installation/_common/02-prerequisites.md" %}}
 
@@ -49,6 +53,12 @@ scoop install hugo-extended
 
 ```sh
 winget install Hugo.Hugo.Extended
+```
+
+To uninstall the extended edition of Hugo:
+
+```sh
+winget uninstall --name "Hugo (Extended)"
 ```
 
 [Winget]: https://learn.microsoft.com/en-us/windows/package-manager/

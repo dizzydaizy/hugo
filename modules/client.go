@@ -32,6 +32,7 @@ import (
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/gohugoio/hugo/common/hexec"
 	"github.com/gohugoio/hugo/common/loggers"
+	"github.com/gohugoio/hugo/config"
 
 	hglob "github.com/gohugoio/hugo/hugofs/glob"
 
@@ -40,8 +41,6 @@ import (
 	"github.com/gohugoio/hugo/hugofs"
 
 	"github.com/gohugoio/hugo/hugofs/files"
-
-	"github.com/gohugoio/hugo/config"
 
 	"golang.org/x/mod/module"
 
@@ -79,21 +78,6 @@ func NewClient(cfg ClientConfig) *Client {
 		goModFilename = n
 	}
 
-	var env []string
-	mcfg := cfg.ModuleConfig
-
-	config.SetEnvVars(&env,
-		"PWD", cfg.WorkingDir,
-		"GO111MODULE", "on",
-		"GOPROXY", mcfg.Proxy,
-		"GOPRIVATE", mcfg.Private,
-		"GONOPROXY", mcfg.NoProxy,
-		"GOPATH", cfg.CacheDir,
-		"GOWORK", mcfg.Workspace, // Requires Go 1.18, see https://tip.golang.org/doc/go1.18
-		// GOCACHE was introduced in Go 1.15. This matches the location derived from GOPATH above.
-		"GOCACHE", filepath.Join(cfg.CacheDir, "pkg", "mod"),
-	)
-
 	logger := cfg.Logger
 	if logger == nil {
 		logger = loggers.NewDefault()
@@ -109,8 +93,8 @@ func NewClient(cfg ClientConfig) *Client {
 		ccfg:              cfg,
 		logger:            logger,
 		noVendor:          noVendor,
-		moduleConfig:      mcfg,
-		environ:           env,
+		moduleConfig:      cfg.ModuleConfig,
+		environ:           cfg.toEnv(),
 		GoModulesFilename: goModFilename,
 	}
 }
@@ -365,19 +349,7 @@ func (c *Client) Get(args ...string) error {
 }
 
 func (c *Client) get(args ...string) error {
-	var hasD bool
-	for _, arg := range args {
-		if arg == "-d" {
-			hasD = true
-			break
-		}
-	}
-	if !hasD {
-		// go get without the -d flag does not make sense to us, as
-		// it will try to build and install go packages.
-		args = append([]string{"-d"}, args...)
-	}
-	if err := c.runGo(context.Background(), c.logger.Out(), append([]string{"get"}, args...)...); err != nil {
+	if err := c.runGo(context.Background(), c.logger.StdOut(), append([]string{"get"}, args...)...); err != nil {
 		return fmt.Errorf("failed to get %q: %w", args, err)
 	}
 	return nil
@@ -387,7 +359,7 @@ func (c *Client) get(args ...string) error {
 // If path is empty, Go will try to guess.
 // If this succeeds, this project will be marked as Go Module.
 func (c *Client) Init(path string) error {
-	err := c.runGo(context.Background(), c.logger.Out(), "mod", "init", path)
+	err := c.runGo(context.Background(), c.logger.StdOut(), "mod", "init", path)
 	if err != nil {
 		return fmt.Errorf("failed to init modules: %w", err)
 	}
@@ -408,14 +380,12 @@ func (c *Client) Verify(clean bool) error {
 	if err != nil {
 		if clean {
 			m := verifyErrorDirRe.FindAllStringSubmatch(err.Error(), -1)
-			if m != nil {
-				for i := 0; i < len(m); i++ {
-					c, err := hugofs.MakeReadableAndRemoveAllModulePkgDir(c.fs, m[i][1])
-					if err != nil {
-						return err
-					}
-					fmt.Println("Cleaned", c)
+			for i := range m {
+				c, err := hugofs.MakeReadableAndRemoveAllModulePkgDir(c.fs, m[i][1])
+				if err != nil {
+					return err
 				}
+				fmt.Println("Cleaned", c)
 			}
 			// Try to verify it again.
 			err = c.runVerify()
@@ -645,7 +615,7 @@ func (c *Client) runGo(
 
 	argsv := collections.StringSliceToInterfaceSlice(args)
 	argsv = append(argsv, hexec.WithEnviron(c.environ))
-	argsv = append(argsv, hexec.WithStderr(io.MultiWriter(stderr, os.Stderr)))
+	argsv = append(argsv, hexec.WithStderr(goOutputReplacerWriter{w: io.MultiWriter(stderr, os.Stderr)}))
 	argsv = append(argsv, hexec.WithStdout(stdout))
 	argsv = append(argsv, hexec.WithDir(c.ccfg.WorkingDir))
 	argsv = append(argsv, hexec.WithContext(ctx))
@@ -689,6 +659,24 @@ If you then run 'hugo mod graph' it should resolve itself to the most recent ver
 	}
 
 	return nil
+}
+
+var goOutputReplacer = strings.NewReplacer(
+	"go: to add module requirements and sums:", "hugo: to add module requirements and sums:",
+	"go mod tidy", "hugo mod tidy",
+)
+
+type goOutputReplacerWriter struct {
+	w io.Writer
+}
+
+func (w goOutputReplacerWriter) Write(p []byte) (n int, err error) {
+	s := goOutputReplacer.Replace(string(p))
+	_, err = w.w.Write([]byte(s))
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (c *Client) tidy(mods Modules, goModOnly bool) error {
@@ -754,11 +742,17 @@ type ClientConfig struct {
 	// This can be nil.
 	IgnoreVendor glob.Glob
 
+	// Ignore any module not found errors.
+	IgnoreModuleDoesNotExist bool
+
 	// Absolute path to the project dir.
 	WorkingDir string
 
 	// Absolute path to the project's themes dir.
 	ThemesDir string
+
+	// The publish dir.
+	PublishDir string
 
 	// Eg. "production"
 	Environment string
@@ -771,6 +765,37 @@ type ClientConfig struct {
 
 func (c ClientConfig) shouldIgnoreVendor(path string) bool {
 	return c.IgnoreVendor != nil && c.IgnoreVendor.Match(path)
+}
+
+func (cfg ClientConfig) toEnv() []string {
+	mcfg := cfg.ModuleConfig
+	var env []string
+	keyVals := []string{
+		"PWD", cfg.WorkingDir,
+		"GO111MODULE", "on",
+		"GOPATH", cfg.CacheDir,
+		"GOWORK", mcfg.Workspace, // Requires Go 1.18, see https://tip.golang.org/doc/go1.18
+		// GOCACHE was introduced in Go 1.15. This matches the location derived from GOPATH above.
+		"GOCACHE", filepath.Join(cfg.CacheDir, "pkg", "mod"),
+	}
+
+	if mcfg.Proxy != "" {
+		keyVals = append(keyVals, "GOPROXY", mcfg.Proxy)
+	}
+	if mcfg.Private != "" {
+		keyVals = append(keyVals, "GOPRIVATE", mcfg.Private)
+	}
+	if mcfg.NoProxy != "" {
+		keyVals = append(keyVals, "GONOPROXY", mcfg.NoProxy)
+	}
+	if mcfg.Auth != "" {
+		// GOAUTH was introduced in Go 1.24, see https://tip.golang.org/doc/go1.24.
+		keyVals = append(keyVals, "GOAUTH", mcfg.Auth)
+	}
+
+	config.SetEnvVars(&env, keyVals...)
+
+	return env
 }
 
 type goBinaryStatus int

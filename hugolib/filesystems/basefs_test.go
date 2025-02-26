@@ -57,14 +57,14 @@ func TestNewBaseFs(t *testing.T) {
 			filenameTheme := filepath.Join(base, fmt.Sprintf("theme-file-%s.txt", theme))
 			filenameOverlap := filepath.Join(base, "f3.txt")
 			afs.Mkdir(base, 0o755)
-			content := []byte(fmt.Sprintf("content:%s:%s", theme, dir))
+			content := fmt.Appendf(nil, "content:%s:%s", theme, dir)
 			afero.WriteFile(afs, filenameTheme, content, 0o755)
 			afero.WriteFile(afs, filenameOverlap, content, 0o755)
 		}
 		// Write some files to the root of the theme
 		base := filepath.Join(workingDir, "themes", theme)
-		afero.WriteFile(afs, filepath.Join(base, fmt.Sprintf("theme-root-%s.txt", theme)), []byte(fmt.Sprintf("content:%s", theme)), 0o755)
-		afero.WriteFile(afs, filepath.Join(base, "file-theme-root.txt"), []byte(fmt.Sprintf("content:%s", theme)), 0o755)
+		afero.WriteFile(afs, filepath.Join(base, fmt.Sprintf("theme-root-%s.txt", theme)), fmt.Appendf(nil, "content:%s", theme), 0o755)
+		afero.WriteFile(afs, filepath.Join(base, "file-theme-root.txt"), fmt.Appendf(nil, "content:%s", theme), 0o755)
 	}
 
 	afero.WriteFile(afs, filepath.Join(workingDir, "file-root.txt"), []byte("content-project"), 0o755)
@@ -220,6 +220,18 @@ target = 'content'
 source = 'content2'
 target = 'content/c2'
 [[module.mounts]]
+source = 'content3'
+target = 'content/watchdisabled'
+disableWatch = true
+[[module.mounts]]
+source = 'content4'
+target = 'content/excludedsome'
+excludeFiles = 'p1.md'
+[[module.mounts]]
+source = 'content5'
+target = 'content/excludedall'
+excludeFiles = '/**'
+[[module.mounts]]
 source = "hugo_stats.json"
 target = "assets/watching/hugo_stats.json"
 -- hugo_stats.json --
@@ -230,11 +242,27 @@ foo
 -- themes/t1/layouts/_default/single.html --
 {{ .Content }}
 -- themes/t1/static/f1.txt --
+-- content3/p1.md --
+-- content4/p1.md --
+-- content4/p2.md --
+-- content5/p3.md --
+-- content5/p4.md --
 `
 	b := hugolib.Test(t, files)
 	bfs := b.H.BaseFs
-	watchFilenames := bfs.WatchFilenames()
-	b.Assert(watchFilenames, qt.HasLen, 6)
+	watchFilenames := toSlashes(bfs.WatchFilenames())
+
+	// content3 has disableWatch = true
+	// content5 has excludeFiles = '/**'
+	b.Assert(watchFilenames, qt.DeepEquals, []string{"/hugo_stats.json", "/content", "/content2", "/content4", "/themes/t1/layouts", "/themes/t1/layouts/_default", "/themes/t1/static"})
+}
+
+func toSlashes(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = filepath.ToSlash(s)
+	}
+	return out
 }
 
 func TestNoSymlinks(t *testing.T) {
@@ -314,7 +342,7 @@ func TestStaticFs(t *testing.T) {
 	checkFileContent(sfs, "f2.txt", c, "Hugo Themes Still Rocks!")
 }
 
-func TestStaticFsMultiHost(t *testing.T) {
+func TestStaticFsMultihost(t *testing.T) {
 	c := qt.New(t)
 	v := config.New()
 	workDir := "mywork"
@@ -478,6 +506,70 @@ Home.
 	_ = stat("blog/b1.md")
 }
 
+func TestReverseLookupShouldOnlyConsiderFilesInCurrentComponent(t *testing.T) {
+	files := `
+-- hugo.toml --
+baseURL = "https://example.com/"
+[module]
+[[module.mounts]]
+source = "files/layouts"
+target = "layouts"
+[[module.mounts]]
+source = "files/layouts/assets"
+target = "assets"
+-- files/layouts/l1.txt --
+l1
+-- files/layouts/assets/l2.txt --
+l2
+`
+	b := hugolib.Test(t, files)
+
+	assetsFs := b.H.Assets
+
+	for _, checkExists := range []bool{false, true} {
+		cps, err := assetsFs.ReverseLookup(filepath.FromSlash("files/layouts/assets/l2.txt"), checkExists)
+		b.Assert(err, qt.IsNil)
+		b.Assert(cps, qt.HasLen, 1)
+		cps, err = assetsFs.ReverseLookup(filepath.FromSlash("files/layouts/l2.txt"), checkExists)
+		b.Assert(err, qt.IsNil)
+		b.Assert(cps, qt.HasLen, 0)
+	}
+}
+
+func TestAssetsIssue12175(t *testing.T) {
+	files := `
+-- hugo.toml --
+baseURL = "https://example.com/"
+[module]
+[[module.mounts]]
+source = "node_modules/@foo/core/assets"
+target = "assets"
+[[module.mounts]]
+source = "assets"
+target = "assets"
+-- node_modules/@foo/core/assets/js/app.js --
+JS.
+-- node_modules/@foo/core/assets/scss/app.scss --
+body { color: red; }
+-- assets/scss/app.scss --
+body { color: blue; }
+-- layouts/index.html --
+Home.
+SCSS: {{ with resources.Get "scss/app.scss" }}{{ .RelPermalink }}|{{ .Content }}{{ end }}|
+# Note that the pattern below will match 2 resources, which doesn't make much sense,
+# but is how the current (and also < v0.123.0) merge logic works, and for most practical purposes, it doesn't matter.
+SCSS Match: {{ with resources.Match "**.scss" }}{{ . | len }}|{{ range .}}{{ .RelPermalink }}|{{ end }}{{ end }}|
+
+`
+
+	b := hugolib.Test(t, files)
+
+	b.AssertFileContent("public/index.html", `
+SCSS: /scss/app.scss|body { color: blue; }|
+SCSS Match: 2|
+`)
+}
+
 func TestStaticComposite(t *testing.T) {
 	files := `
 -- hugo.toml --
@@ -510,6 +602,30 @@ f3.txt false
 files true
 files/f1.txt false
 files/f2.txt false
+`)
+}
+
+func TestMountIssue12141(t *testing.T) {
+	files := `
+-- hugo.toml --
+disableKinds = ["taxonomy", "term"]
+[module]
+[[module.mounts]]
+source = "myfiles"
+target = "static"
+[[module.mounts]]
+source = "myfiles/f1.txt"
+target = "static/f2.txt"
+-- myfiles/f1.txt --
+f1
+`
+	b := hugolib.Test(t, files)
+	fs := b.H.BaseFs.StaticFs("")
+
+	b.AssertFs(fs, `
+. true
+f1.txt false
+f2.txt false
 `)
 }
 
@@ -567,8 +683,8 @@ func setConfigAndWriteSomeFilesTo(fs afero.Fs, v config.Provider, key, val strin
 	workingDir := v.GetString("workingDir")
 	v.Set(key, val)
 	fs.Mkdir(val, 0o755)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		filename := filepath.Join(workingDir, val, fmt.Sprintf("f%d.txt", i+1))
-		afero.WriteFile(fs, filename, []byte(fmt.Sprintf("content:%s:%d", key, i+1)), 0o755)
+		afero.WriteFile(fs, filename, fmt.Appendf(nil, "content:%s:%d", key, i+1), 0o755)
 	}
 }

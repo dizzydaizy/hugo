@@ -21,7 +21,7 @@ toc: true
 Use `hugo mod init` to initialize a new Hugo Module. If it fails to guess the module path, you must provide it as an argument, e.g.:
 
 ```sh
-hugo mod init github.com/gohugoio/myShortcodes
+hugo mod init github.com/<your_user>/<your_project>
 ```
 
 Also see the [CLI Doc](/commands/hugo_mod_init/).
@@ -31,7 +31,7 @@ Also see the [CLI Doc](/commands/hugo_mod_init/).
 The easiest way to use a Module for a theme is to import it in the configuration.
 
 1. Initialize the hugo module system: `hugo mod init github.com/<your_user>/<your_project>`
-2. Import the theme:
+1. Import the theme:
 
 {{< code-toggle file=hugo >}}
 [module]
@@ -107,12 +107,12 @@ Also see the [CLI Doc](/commands/hugo_mod_graph/).
 
 ## Vendor your modules
 
-`hugo mod vendor` will write all the module dependencies to a `_vendor` folder, which will then be used for all subsequent builds.
+`hugo mod vendor` will write all the module dependencies to a `_vendor` directory, which will then be used for all subsequent builds.
 
 Note that:
 
 * You can run `hugo mod vendor` on any level in the module tree.
-* Vendoring will not store modules stored in your `themes` folder.
+* Vendoring will not store modules stored in your `themes` directory.
 * Most commands accept a `--ignoreVendorPaths` flag, which will then not use the vendored modules in `_vendor` for the module paths matching the [Glob](https://github.com/gobwas/glob) pattern given.
 
 Also see the [CLI Doc](/commands/hugo_mod_vendor/).
@@ -133,8 +133,6 @@ Also see the [CLI Doc](/commands/hugo_mod_clean/).
 
 ## Module workspaces
 
-{{< new-in 0.109.0 >}}
-
 Workspace support was added in [Go 1.18](https://go.dev/blog/get-familiar-with-workspaces) and Hugo got solid support for it in the `v0.109.0` version.
 
 A common use case for a workspace is to simplify local development of a site with its theme modules.
@@ -150,7 +148,7 @@ use .
 use ../gohugoioTheme
 ```
 
-Using the `use` directive, list all the modules you want to work on, pointing to its relative location. As in the example above, it's recommended to always include the main project (the ".") in the list.
+Using the `use` directive, list all the modules you want to work on, pointing to its relative location. As in the example above, it's recommended to always include the main project (the `.`) in the list.
 
 With that you can start the Hugo server with that workspace enabled:
 

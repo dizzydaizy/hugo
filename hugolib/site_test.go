@@ -147,8 +147,8 @@ func TestLastChange(t *testing.T) {
 
 	s := buildSingleSite(t, deps.DepsCfg{Fs: fs, Configs: configs}, BuildCfg{SkipRender: true})
 
-	c.Assert(s.LastChange().IsZero(), qt.Equals, false)
-	c.Assert(s.LastChange().Year(), qt.Equals, 2017)
+	c.Assert(s.Lastmod().IsZero(), qt.Equals, false)
+	c.Assert(s.Lastmod().Year(), qt.Equals, 2017)
 }
 
 // Issue #_index
@@ -372,14 +372,14 @@ func TestMainSections(t *testing.T) {
 
 			b := newTestSitesBuilder(c).WithViper(v)
 
-			for i := 0; i < 20; i++ {
+			for i := range 20 {
 				b.WithContent(fmt.Sprintf("page%d.md", i), `---
 title: "Page"
 ---
 `)
 			}
 
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				b.WithContent(fmt.Sprintf("blog/page%d.md", i), `---
 title: "Page"
 tags: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
@@ -387,7 +387,7 @@ tags: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
 `)
 			}
 
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				b.WithContent(fmt.Sprintf("docs/page%d.md", i), `---
 title: "Page"
 ---
@@ -427,8 +427,8 @@ mainSections=["a", "b"]
 {{/* Behaviour before Hugo 0.112.0. */}}
 MainSections Params: {{ site.Params.mainSections }}|
 MainSections Site method: {{ site.MainSections }}|
-	
-	
+
+
 	`
 
 		b := Test(t, files)
@@ -478,8 +478,8 @@ disableKinds = ['RSS','sitemap','taxonomy','term']
 -- layouts/index.html --
 MainSections Params: {{ site.Params.mainSections }}|
 MainSections Site method: {{ site.MainSections }}|
-	
-	
+
+
 	`
 
 		b := Test(t, files)
@@ -787,9 +787,12 @@ func TestGroupedPages(t *testing.T) {
 		t.Errorf("PageGroup has unexpected number of pages. First group should have '%d' pages, got '%d' pages", 2, len(byparam[0].Pages))
 	}
 
-	_, err = s.RegularPages().GroupByParam("not_exist")
-	if err == nil {
-		t.Errorf("GroupByParam didn't return an expected error")
+	byNonExistentParam, err := s.RegularPages().GroupByParam("not_exist")
+	if err != nil {
+		t.Errorf("GroupByParam returned an error when it shouldn't")
+	}
+	if len(byNonExistentParam) != 0 {
+		t.Errorf("PageGroup array has unexpected elements. Group length should be '%d', got '%d'", 0, len(byNonExistentParam))
 	}
 
 	byOnlyOneParam, err := s.RegularPages().GroupByParam("only_one")

@@ -16,9 +16,7 @@ action:
   signatures: [PAGE.Ancestors]
 ---
 
-{{< new-in 0.109.0 >}}
-
-{{% include "methods/page/_common/definition-of-section.md" %}}
+{{% glossary-term section %}}
 
 With this content structure:
 

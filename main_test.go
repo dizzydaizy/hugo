@@ -56,19 +56,16 @@ func TestUnfinished(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	os.Exit(
-		testscript.RunMain(m, map[string]func() int{
-			// The main program.
-			"hugo": func() int {
-				err := commands.Execute(os.Args[1:])
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return 1
-				}
-				return 0
-			},
-		}),
-	)
+	testscript.Main(m, map[string]func(){
+		// The main program.
+		"hugo": func() {
+			err := commands.Execute(os.Args[1:])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		},
+	})
 }
 
 var commonTestScriptsParam = testscript.Params{
@@ -134,7 +131,7 @@ var commonTestScriptsParam = testscript.Params{
 				fmt.Fprintf(ts.Stdout(), "%s %04o %s %s\n", fi.Mode(), fi.Mode().Perm(), fi.ModTime().Format(time.RFC3339Nano), fi.Name())
 			}
 		},
-		// append appends to a file with a leaading newline.
+		// append appends to a file with a leading newline.
 		"append": func(ts *testscript.TestScript, neg bool, args []string) {
 			if len(args) < 2 {
 				ts.Fatalf("usage: append FILE TEXT")

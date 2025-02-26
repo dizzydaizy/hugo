@@ -73,7 +73,9 @@ type FileMeta struct {
 	InclusionFilter *glob.FilenameFilter
 
 	// Rename the name part of the file (not the directory).
-	Rename func(name string, toFrom bool) string
+	// Returns the new name and a boolean indicating if the file
+	// should be included.
+	Rename func(name string, toFrom bool) (string, bool)
 }
 
 func (m *FileMeta) Copy() *FileMeta {
@@ -91,7 +93,7 @@ func (m *FileMeta) Merge(from *FileMeta) {
 	dstv := reflect.Indirect(reflect.ValueOf(m))
 	srcv := reflect.Indirect(reflect.ValueOf(from))
 
-	for i := 0; i < dstv.NumField(); i++ {
+	for i := range dstv.NumField() {
 		v := dstv.Field(i)
 		if !v.CanSet() {
 			continue

@@ -47,8 +47,8 @@ func BenchmarkGetPage(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 100; j++ {
+	for i := range 10 {
+		for j := range 100 {
 			writeSource(b, fs, filepath.Join("content", fmt.Sprintf("sect%d", i), fmt.Sprintf("page%d.md", j)), "CONTENT")
 		}
 	}
@@ -91,8 +91,8 @@ func createGetPageRegularBenchmarkSite(t testing.TB) *Site {
 		return fmt.Sprintf(pageCollectionsPageTemplate, title)
 	}
 
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 100; j++ {
+	for i := range 10 {
+		for j := range 100 {
 			content := pc(fmt.Sprintf("Title%d_%d", i, j))
 			writeSource(c, fs, filepath.Join("content", fmt.Sprintf("sect%d", i), fmt.Sprintf("page%d.md", j)), content)
 		}
@@ -105,7 +105,7 @@ func TestBenchmarkGetPageRegular(t *testing.T) {
 	c := qt.New(t)
 	s := createGetPageRegularBenchmarkSite(t)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		pp := path.Join("/", fmt.Sprintf("sect%d", i), fmt.Sprintf("page%d.md", i))
 		page, _ := s.getPage(nil, pp)
 		c.Assert(page, qt.Not(qt.IsNil), qt.Commentf(pp))
@@ -192,8 +192,8 @@ func TestGetPage(t *testing.T) {
 		return fmt.Sprintf(pageCollectionsPageTemplate, title)
 	}
 
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 10; j++ {
+	for i := range 10 {
+		for j := range 10 {
 			content := pc(fmt.Sprintf("Title%d_%d", i, j))
 			writeSource(t, fs, filepath.Join("content", fmt.Sprintf("sect%d", i), fmt.Sprintf("page%d.md", j)), content)
 		}
@@ -384,6 +384,62 @@ Home. {{ with .Page.GetPage "p1.xyz" }}{{ else }}OK 1{{ end }} {{ with .Site.Get
 
 	b := Test(t, files)
 	b.AssertFileContent("public/index.html", "Home. OK 1 OK 2")
+}
+
+func TestGetPageIssue12120(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['home','rss','section','sitemap','taxonomy','term']
+-- content/s1/p1/index.md --
+---
+title: p1
+layout: p1
+---
+-- content/s1/p2.md --
+---
+title: p2
+layout: p2
+---
+-- layouts/_default/p1.html --
+{{ (.GetPage "p2.md").Title }}|
+-- layouts/_default/p2.html --
+{{ (.GetPage "p1").Title }}|
+`
+
+	b := Test(t, files)
+	b.AssertFileContent("public/s1/p1/index.html", "p2") // failing test
+	b.AssertFileContent("public/s1/p2/index.html", "p1")
+}
+
+func TestGetPageNewsVsTagsNewsIssue12638(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['rss','section','sitemap']
+[taxonomies]
+  tag = "tags"
+-- content/p1.md --
+---
+title: p1
+tags: [news]
+---
+-- layouts/index.html --
+/tags/news: {{ with .Site.GetPage "/tags/news" }}{{ .Title }}{{ end }}|
+news: {{ with .Site.GetPage "news" }}{{ .Title }}{{ end }}|
+/news: {{ with .Site.GetPage "/news" }}{{ .Title }}{{ end }}|
+
+`
+
+	b := Test(t, files)
+
+	b.AssertFileContent("public/index.html",
+		"/tags/news: News|",
+		"news: News|",
+		"/news: |",
+	)
 }
 
 func TestGetPageBundleToRegular(t *testing.T) {
@@ -635,4 +691,67 @@ RegularPagesRecursive: {{ range .RegularPagesRecursive }}{{ .Kind }}:{{ .RelPerm
 		}).Build()
 
 	b.AssertFileContent("public/index.html", `RegularPagesRecursive: page:/p1/|page:/post/p2/||End.`)
+}
+
+// Issue #12169.
+func TestPagesSimilarSectionNames(t *testing.T) {
+	files := `
+-- hugo.toml --
+-- content/draftsection/_index.md --
+---
+draft: true
+---
+-- content/draftsection/sub/_index.md --got
+-- content/draftsection/sub/d1.md --
+-- content/s1/_index.md --
+-- content/s1/p1.md --
+-- content/s1-foo/_index.md --
+-- content/s1-foo/p2.md --
+-- content/s1-foo/s2/_index.md --
+-- content/s1-foo/s2/p3.md --
+-- content/s1-foo/s2-foo/_index.md --
+-- content/s1-foo/s2-foo/p4.md --
+-- layouts/_default/list.html --
+{{ .RelPermalink }}: Pages: {{ range .Pages }}{{ .RelPermalink }}|{{ end }}$
+
+`
+	b := Test(t, files)
+
+	b.AssertFileContent("public/index.html", "/: Pages: /s1-foo/|/s1/|$")
+	b.AssertFileContent("public/s1/index.html", "/s1/: Pages: /s1/p1/|$")
+	b.AssertFileContent("public/s1-foo/index.html", "/s1-foo/: Pages: /s1-foo/p2/|/s1-foo/s2-foo/|/s1-foo/s2/|$")
+	b.AssertFileContent("public/s1-foo/s2/index.html", "/s1-foo/s2/: Pages: /s1-foo/s2/p3/|$")
+}
+
+func TestGetPageContentAdapterBaseIssue12561(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- hugo.toml --
+disableKinds = ['rss','section','sitemap','taxonomy','term']
+-- layouts/index.html --
+Test A: {{ (site.GetPage "/s1/p1").Title }}
+Test B: {{ (site.GetPage "p1").Title }}
+Test C: {{ (site.GetPage "/s2/p2").Title }}
+Test D: {{ (site.GetPage "p2").Title }}
+-- layouts/_default/single.html --
+{{ .Title }}
+-- content/s1/p1.md --
+---
+title: p1
+---
+-- content/s2/_content.gotmpl --
+{{ .AddPage (dict "path" "p2" "title" "p2") }}
+`
+
+	b := Test(t, files)
+
+	b.AssertFileExists("public/s1/p1/index.html", true)
+	b.AssertFileExists("public/s2/p2/index.html", true)
+	b.AssertFileContent("public/index.html",
+		"Test A: p1",
+		"Test B: p1",
+		"Test C: p2",
+		"Test D: p2", // fails
+	)
 }

@@ -24,8 +24,10 @@ import (
 func TestPaginator(t *testing.T) {
 	configFile := `
 baseURL = "https://example.com/foo/"
-paginate = 3
-paginatepath = "thepage"
+
+[pagination]
+pagerSize = 3
+path = "thepage"
 
 [languages.en]
 weight = 1
@@ -38,7 +40,7 @@ contentDir = "content/nn"
 `
 	b := newTestSitesBuilder(t).WithConfigFile("toml", configFile)
 	var content []string
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		for _, contentDir := range []string{"content/en", "content/nn"} {
 			content = append(content, fmt.Sprintf(contentDir+"/blog/page%d.md", i), fmt.Sprintf(`---
 title: Page %d
@@ -116,7 +118,7 @@ cascade:
     - JSON
 ---`)
 
-	for i := 0; i < 22; i++ {
+	for i := range 22 {
 		b.WithContent(fmt.Sprintf("p%d.md", i+1), fmt.Sprintf(`---
 title: "Page"
 weight: %d
@@ -161,10 +163,11 @@ Len Pag: {{ len $pag.Pages }}
 func TestPaginatorNodePagesOnly(t *testing.T) {
 	files := `
 -- hugo.toml --
-paginate = 1
+[pagination]
+pagerSize = 1
 -- content/p1.md --
 -- layouts/_default/single.html --
-Paginator: {{ .Paginator }}	
+Paginator: {{ .Paginator }}
 `
 	b, err := TestE(t, files)
 	b.Assert(err, qt.IsNotNil)
